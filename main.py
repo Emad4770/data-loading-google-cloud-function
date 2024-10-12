@@ -35,3 +35,16 @@ def hello_gcs(cloud_event):
     location = '_'.join(file_parts[:-2])  # Everything before the date parts
     start_date = file_parts[-2]  # The second last part is the start date
     end_date = file_parts[-1].split('.')[0]  # Last part before the extension is the end date
+
+
+    print(f"Processing {sensor_type} data for city: {city}, district: {district}")
+    print(f"id: {unique_id}")
+    print(f"Location: {location}")
+    print(f"Start Date: {start_date} | End Date: {end_date}")
+    print(f"Event ID: {event_id}")
+    print(f"Event type: {event_type}")
+    print(f"Bucket: {bucket}")
+    print(f"File: {name}")
+    print(f"Metageneration: {metageneration}")
+    print(f"Created: {time_created}")
+    print(f"Updated: {updated}")
