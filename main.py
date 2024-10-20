@@ -20,15 +20,12 @@ def get_lookup_table():
     
     # Load the Excel file into a pandas DataFrame
     lookup_df = pd.read_excel(io.BytesIO(lookup_table_content))
-    print("Lookup Table Loaded successfully.")
+    print("Lookup Table loaded successfully.")
     return lookup_df
 
 def find_sensor_id(file_name, lookup_df):
     """Find the corresponding Sensor ID from the lookup table based on the file name."""
-    # Remove the timestamp part from the file name
     base_file_name = '_'.join(file_name.split('_')[:-2]).strip()  # Keep everything except the last two parts
-
-    print(f"Searching for Sensor ID using base file name: {base_file_name}")
     sensor_info = lookup_df[lookup_df['File Name'] == base_file_name]
     
     if not sensor_info.empty:
@@ -47,12 +44,11 @@ def process_csv(file_content, sensor_id):
     # Check the number of columns
     if data.shape[1] != 2:
         raise ValueError(f"CSV file must have exactly two columns, but found {data.shape[1]} columns.")
-    
+
     # Rename columns and add Sensor ID as the first column
     data.columns = ['Timestamp', 'Value']
     data.insert(0, 'Sensor ID', sensor_id['Sensor ID'])  # Insert Sensor ID as the first column
-    
-    print("CSV processed successfully.")
+
     return data
 
 def upload_to_bucket(data, new_file_path):
@@ -71,7 +67,7 @@ def upload_to_bucket(data, new_file_path):
 def process_and_copy_file(file_name, bucket_name, lookup_df):
     """Process the raw file, modify it, and upload to the destination bucket."""
     try:
-        print(f"Attempting to download file: {file_name} from bucket: {bucket_name}")
+        print(f"Processing file: {file_name}")
         # Download the file from the source bucket
         bucket = storage_client.get_bucket(bucket_name)
         blob = bucket.blob(file_name)
@@ -89,7 +85,6 @@ def process_and_copy_file(file_name, bucket_name, lookup_df):
         
         # Rename file according to the desired format without folder structure
         if 'Yes' in sensor_info['Tank']:
-            # Add tank info if applicable
             tank_type = "tank_in" if 'in' in sensor_info['Tank'] else "tank_out"
             new_file_name = f"{sensor_info['City']}_{sensor_info['District']}_{tank_type}_{variable}_{timestamp}.csv"
         else:
