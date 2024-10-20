@@ -1,99 +1,120 @@
 import functions_framework
-from google.cloud import storage
 import pandas as pd
-import logging
+from google.cloud import storage
+import os
 import io
+
+# Define bucket names and file paths
+CONFIG_BUCKET_NAME = 'sdw-config-files'
+DATA_BUCKET_NAME = 'sdw-sensor-data'
+LOOKUP_TABLE_FILE_PATH = 'lookup_table/LOOKUP_TABLE.xlsx'
 
 # Initialize Google Cloud Storage client
 storage_client = storage.Client()
 
-# Load the lookup table from the Excel file
-def load_lookup_table():
-    bucket_name = "sdw-config-files"
-    blob_name = "lookup_table/LOOKUP_TABLE.xlsx"
+def get_lookup_table():
+    """Load the lookup table from the GCS bucket."""
+    bucket = storage_client.get_bucket(CONFIG_BUCKET_NAME)
+    blob = bucket.blob(LOOKUP_TABLE_FILE_PATH)
+    lookup_table_content = blob.download_as_bytes()
     
-    bucket = storage_client.bucket(bucket_name)
-    blob = bucket.blob(blob_name)
-    
-    # Download the blob as a byte stream
-    data = blob.download_as_bytes()
-    # Read the Excel file into a DataFrame
-    df = pd.read_excel(io.BytesIO(data))
-    
-    # Convert DataFrame to a list of dictionaries
-    return df.to_dict(orient='records')
+    # Load the Excel file into a pandas DataFrame
+    lookup_df = pd.read_excel(io.BytesIO(lookup_table_content))
+    print("Lookup Table Loaded successfully.")
+    return lookup_df
 
-# Triggered by a change in the storage bucket
-@functions_framework.cloud_event
-def process_sensor_data(cloud_event):
+def find_sensor_id(file_name, lookup_df):
+    """Find the corresponding Sensor ID from the lookup table based on the file name."""
+    # Remove the timestamp part from the file name
+    base_file_name = '_'.join(file_name.split('_')[:-2]).strip()  # Keep everything except the last two parts
+
+    print(f"Searching for Sensor ID using base file name: {base_file_name}")
+    sensor_info = lookup_df[lookup_df['File Name'] == base_file_name]
+    
+    if not sensor_info.empty:
+        return sensor_info.iloc[0]  # Return the entire row of sensor info
+    else:
+        raise ValueError(f"Sensor ID not found for file {file_name}")
+
+def process_csv(file_content, sensor_id):
+    """Process the CSV content, rename columns, clean data, and add Sensor ID."""
+    # Remove any trailing semicolons in the entire file content
+    file_content = '\n'.join(line.rstrip(';') for line in file_content.splitlines())
+
+    # Load the cleaned file content into a pandas DataFrame
+    data = pd.read_csv(io.StringIO(file_content), sep=';')
+
+    # Check the number of columns
+    if data.shape[1] != 2:
+        raise ValueError(f"CSV file must have exactly two columns, but found {data.shape[1]} columns.")
+    
+    # Rename columns and add Sensor ID as the first column
+    data.columns = ['Timestamp', 'Value']
+    data.insert(0, 'Sensor ID', sensor_id['Sensor ID'])  # Insert Sensor ID as the first column
+    
+    print("CSV processed successfully.")
+    return data
+
+def upload_to_bucket(data, new_file_path):
+    """Upload processed CSV content to the new GCS bucket location."""
+    output = io.StringIO()
+    data.to_csv(output, index=False)
+    output.seek(0)
+
+    # Upload to the new bucket
+    bucket = storage_client.get_bucket(DATA_BUCKET_NAME)
+    blob = bucket.blob(new_file_path)
+    blob.upload_from_string(output.getvalue(), content_type='text/csv')
+
+    print(f"Uploaded file to {new_file_path} successfully.")
+
+def process_and_copy_file(file_name, bucket_name, lookup_df):
+    """Process the raw file, modify it, and upload to the destination bucket."""
     try:
-        lookup_table = load_lookup_table()  # Load lookup table from Excel
+        print(f"Attempting to download file: {file_name} from bucket: {bucket_name}")
+        # Download the file from the source bucket
+        bucket = storage_client.get_bucket(bucket_name)
+        blob = bucket.blob(file_name)
+        file_content = blob.download_as_text()
 
-        data = cloud_event.data
-        event_id = cloud_event["id"]
-        event_type = cloud_event["type"]
+        # Find the sensor ID using the lookup table
+        sensor_info = find_sensor_id(file_name, lookup_df)
 
-        bucket = data["bucket"]
-        file_name = data["name"]
+        # Process the CSV content: rename columns, add Sensor ID, clean up
+        processed_data = process_csv(file_content, sensor_info)
 
-        print(f"Event ID: {event_id}")
-        print(f"Event type: {event_type}")
-        print(f"Bucket: {bucket}")
-        print(f"File: {file_name}")
-
-        # Get the source bucket and blob (file)
-        raw_bucket = storage_client.bucket(bucket)
-        blob = raw_bucket.blob(file_name)
-
-        # Strip the .csv extension for lookup purposes
-        base_file_name = file_name.replace(".csv", "")
-
-        # Lookup file name in the table
-        match = next((item for item in lookup_table if item['File Name'] in base_file_name), None)
-
-        if match:
-            try:
-                # Extract the timestamp from the original file name (the last two segments)
-                parts = base_file_name.split('_')
-                timestamp = parts[-2] + '_' + parts[-1]  # Assumes timestamp is in the last two segments
-
-                # Construct the destination path based on the city, district, and variable
-                city = match['City'].lower()
-                district = match['District'].lower()  # Spaces will not be replaced with underscores
-                variable = match['Variable'].lower()
-
-                # Rename file according to the desired format with the original timestamp
-                if 'Yes' in match['Tank']:
-                    # Add tank info if applicable
-                    tank = "tank_in" if 'in' in match['Tank'] else "tank_out"
-                    new_file_name = f"{city}_{district}_{tank}_{variable}_{timestamp}.csv"
-                else:
-                    new_file_name = f"{city}_{district}_{variable}_{timestamp}.csv"
-
-                # Destination bucket and path
-                destination_bucket_name = "sdw-sensor-data"
-                destination_path = f"{city}/{district}/{variable}/{new_file_name}"
-
-                # Get destination bucket
-                destination_bucket = storage_client.bucket(destination_bucket_name)
-
-                # Copy the file to the new destination
-                new_blob = raw_bucket.copy_blob(blob, destination_bucket, destination_path)
-
-                print(f"Successfully copied {file_name} to {destination_path}")
-
-            except Exception as e:
-                # Handle any issues related to copying the file
-                logging.error(f"Failed to copy file {file_name} to {destination_path}: {str(e)}")
-
-        else:
-            # File not found in the lookup table
-            logging.error(f"File {file_name} not found in the lookup table.")
+        # Construct the new file path in the destination bucket
+        variable = sensor_info['Variable']
+        timestamp = file_name.split('_')[-2]  # Extract timestamp from the original file name
         
-    except KeyError as e:
-        # Handle missing expected fields in cloud_event
-        logging.error(f"KeyError - missing field: {str(e)}")
+        # Rename file according to the desired format without folder structure
+        if 'Yes' in sensor_info['Tank']:
+            # Add tank info if applicable
+            tank_type = "tank_in" if 'in' in sensor_info['Tank'] else "tank_out"
+            new_file_name = f"{sensor_info['City']}_{sensor_info['District']}_{tank_type}_{variable}_{timestamp}.csv"
+        else:
+            new_file_name = f"{sensor_info['City']}_{sensor_info['District']}_{variable}_{timestamp}.csv"
 
+        # Construct the folder structure for upload in lowercase
+        folder_structure = f"{sensor_info['City'].lower()}/{sensor_info['District'].lower()}/{variable.lower()}/"
+
+        # Upload the processed file to the destination bucket in the corresponding folder
+        new_file_path = folder_structure + new_file_name
+        upload_to_bucket(processed_data, new_file_path)
+        print(f"File processed and uploaded successfully: {new_file_path}")
+
+    except ValueError as e:
+        print(f"Error processing file {file_name}: {e}")
     except Exception as e:
-        # Handle other unforeseen errors
-        logging.error(f"An error occurred: {str(e)}")
+        print(f"Unexpected error for file {file_name}: {e}")
+
+def process_sensor_data(event, context):
+    """Cloud Function triggered by new files in the raw sensor data bucket."""
+    file_name = event['name']
+    bucket_name = event['bucket']
+
+    # Load the lookup table
+    lookup_df = get_lookup_table()
+
+    # Process and copy the file
+    process_and_copy_file(file_name, bucket_name, lookup_df)
