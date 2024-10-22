@@ -57,8 +57,8 @@ After the file has been processed and moved to the new storage bucket, this func
 
 | Sensor ID | Timestamp           | Value |
 |-----------|---------------------|-------|
-| 001       | 2023-08-15 12:30:45 | 10.5  |
-| 002       | 2023-08-15 12:31:00 | 11.2  |
+| MAR_SAP_FLW       | 2023/08/15 12:30:00 | 10.5  |
+| MAR_SAP_FLW       | 2023/08/15 12:45:00 | 11.2  |
 
 ### 3. **Error Handling**
 
