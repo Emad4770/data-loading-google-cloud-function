@@ -10,7 +10,7 @@ This function is triggered whenever a new CSV file is uploaded to a specified Go
 
 - **Loads a Lookup Table**: Loads a lookup table from an Excel file stored in a separate bucket.
 - **Processes the Uploaded File**: Matches the file with metadata (e.g., city, district, sensor type) from the lookup table.
-- **Renames and Moves the File**: Renames the file based on metadata and moves it to an organized folder structure in a different bucket.
+- **Renames and Moves the File**: Renames the file and adds a Sensor ID column based on metadata and moves it to an organized folder structure in a different bucket.
 
 #### Renaming Logic
 
