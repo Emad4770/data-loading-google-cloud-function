@@ -31,7 +31,7 @@ def find_sensor_id(file_name, lookup_df):
     if not sensor_info.empty:
         return sensor_info.iloc[0]  # Return the entire row of sensor info
     else:
-        raise ValueError(f"Sensor ID not found for file {file_name}")
+        raise ValueError(f"Sensor ID not found for file {file_name} , it does not have a valid name structure.")
 
 def process_csv(file_content, sensor_id):
     """Process the CSV content, rename columns, clean data, and add Sensor ID."""
@@ -81,14 +81,26 @@ def process_and_copy_file(file_name, bucket_name, lookup_df):
 
         # Construct the new file path in the destination bucket
         variable = sensor_info['Variable']
-        timestamp = file_name.split('_')[-2]  # Extract timestamp from the original file name
-        
-        # Rename file according to the desired format without folder structure
+       
+        # Remove the '.csv' extension from the file name if present
+        file_name = file_name.replace('.csv', '')
+        # Split the file name and check how many timestamps are present
+        timestamps = file_name.split('_')[-2:]
+
+        if len(timestamps) == 2:
+            start_timestamp = timestamps[0]
+            end_timestamp = timestamps[1]
+        else:
+            # If only one timestamp is found, use it for both start and end
+            start_timestamp = end_timestamp = timestamps[0]
+
+        # Rename file according to the desired format with the available timestamps
         if 'Yes' in sensor_info['Tank']:
             tank_type = "tank_in" if 'in' in sensor_info['Tank'] else "tank_out"
-            new_file_name = f"{sensor_info['City']}_{sensor_info['District']}_{tank_type}_{variable}_{timestamp}.csv"
+            new_file_name = f"{sensor_info['City']}_{sensor_info['District']}_{tank_type}_{variable}_{start_timestamp}_{end_timestamp}.csv"
         else:
-            new_file_name = f"{sensor_info['City']}_{sensor_info['District']}_{variable}_{timestamp}.csv"
+            new_file_name = f"{sensor_info['City']}_{sensor_info['District']}_{variable}_{start_timestamp}_{end_timestamp}.csv"
+
 
         # Construct the folder structure for upload in lowercase
         folder_structure = f"{sensor_info['City'].lower()}/{sensor_info['District'].lower()}/{variable.lower()}/"
